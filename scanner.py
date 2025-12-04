@@ -110,7 +110,13 @@ def resolve_redirects(url: str, timeout: int, verify_ssl: bool, max_redirects: i
     return current_url
 
 
-def check_vulnerability(host: str, timeout: int = 10, verify_ssl: bool = True, follow_redirects: bool = True) -> dict:
+def check_vulnerability(
+    host: str,
+    timeout: int = 10,
+    verify_ssl: bool = True,
+    follow_redirects: bool = True,
+    user_agent: Optional[str] = None,
+) -> dict:
     """
     Check if a host is vulnerable to CVE-2025-55182/CVE-2025-66478.
 
@@ -151,8 +157,14 @@ def check_vulnerability(host: str, timeout: int = 10, verify_ssl: bool = True, f
 
     body, content_type = build_payload()
 
+    ua = user_agent or (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/60.0.3112.113 Safari/537.36 React2ShellScanner/1.0.0"
+    )
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.113 Safari/537.36 React2ShellScanner/1.0.0",
+        "User-Agent": ua,
         "Next-Action": "x",
         "X-Nextjs-Request-Id": "b5dce965",
         "Next-Router-State-Tree": '%5B%22%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D',
@@ -189,7 +201,7 @@ def check_vulnerability(host: str, timeout: int = 10, verify_ssl: bool = True, f
 
         # Check vulnerability indicators:
         # 1. Status code 500
-        # 2. Response contains 'E{"digest"'
+        # 2. Response contains 'E{\"digest\"'
         if response.status_code == 500 and 'E{"digest"' in response.text:
             result["vulnerable"] = True
         else:
@@ -345,6 +357,11 @@ Examples:
         help="Disable colored output"
     )
 
+    parser.add_argument(
+        "--user-agent",
+        help="Custom User-Agent string to use for HTTP requests"
+    )
+
     args = parser.parse_args()
 
     if args.no_color or not sys.stdout.isatty():
@@ -376,6 +393,8 @@ Examples:
         print(colorize(f"[*] Timeout: {args.timeout}s", Colors.CYAN))
         if args.insecure:
             print(colorize("[!] SSL verification disabled", Colors.YELLOW))
+        if args.user_agent:
+            print(colorize(f"[*] Using custom User-Agent: {args.user_agent}", Colors.CYAN))
         print()
 
     results = []
@@ -389,7 +408,7 @@ Examples:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     if len(hosts) == 1:
-        result = check_vulnerability(hosts[0], args.timeout, verify_ssl)
+        result = check_vulnerability(hosts[0], args.timeout, verify_ssl, user_agent=args.user_agent)
         results.append(result)
         if not args.quiet or result["vulnerable"]:
             print_result(result, args.verbose)
@@ -398,7 +417,7 @@ Examples:
     else:
         with ThreadPoolExecutor(max_workers=args.threads) as executor:
             futures = {
-                executor.submit(check_vulnerability, host, args.timeout, verify_ssl): host
+                executor.submit(check_vulnerability, host, args.timeout, verify_ssl, True, args.user_agent): host
                 for host in hosts
             }
 
